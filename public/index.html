@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lead Gen Dashboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input, textarea { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; }
+    button { margin-top: 20px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    #status { margin-top: 24px; padding: 16px; background: #f4f4f4; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Lead Gen Campaign</h1>
+
+  <label for="businessType">Business type</label>
+  <input id="businessType" value="gyms" />
+
+  <label for="country">Country</label>
+  <input id="country" placeholder="United States" />
+
+  <label for="states">States (comma-separated)</label>
+  <textarea id="states" rows="3" placeholder="Texas, Ohio, California"></textarea>
+
+  <button id="startBtn">Start Campaign</button>
+  <button id="stopBtn" disabled>Stop Campaign</button>
+
+  <div id="status">No campaign running.</div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
