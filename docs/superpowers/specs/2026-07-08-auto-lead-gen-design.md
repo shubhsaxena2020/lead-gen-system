@@ -38,10 +38,16 @@ labor from a process the user already does by hand.
   confirmed with the user on 2026-07-08.
 - **Gemini/9router is off-limits for this system.** The user's Gemini-via-9router
   bridge (see memory: `nine-router-resolved`) is reserved for their Claude Code
-  fallback in VS Code and has usage limits. This system uses **MiMo** (via OpenCode,
-  matching the existing pattern from the user's `brain-hands-pipeline` memory) for
-  any AI-assisted normalization/extraction work, since it's free and doesn't need
-  heavy reasoning for this task.
+  fallback in VS Code and has usage limits.
+- **MiMo/OpenCode ToS note (accepted risk).** The user's MiMo token plan is
+  "interactive agent-tool use only, NOT unattended automation" (see memory:
+  `brain-hands-pipeline`) — this is a term of the token plan itself, not specific to
+  any one project that uses it. This system calls MiMo automatically, unattended,
+  in periodic batches (see "AI review batching" below), which does fall under that
+  same restriction. The user was presented this tradeoff explicitly on 2026-07-08 and
+  chose to accept the risk (same category of decision as the Gemini/9router ToS
+  risk) rather than restrict MiMo calls to only when they're actively present. Not an
+  open question — don't re-raise unless usage patterns change dramatically.
 - Must run entirely on the Oracle VPS (see memory: `oracle-vps-state`) — 4 vCPU,
   24GB RAM, Ubuntu 24.04, already running Docker, Postgres, Caddy. No dependency on
   the user's laptop being on.
@@ -101,22 +107,41 @@ For each state pulled off the queue:
    contact info (email, additional phone) appears in the public result
    title/snippet. This does not crawl Facebook/Instagram directly — it only reads
    what a search engine has already publicly indexed.
-4. **Normalize:** Pass the raw OSM fields + enrichment snippet text to MiMo (via
-   OpenCode) to extract/clean into a consistent row shape: business name, address,
-   phone, email (or "not found"), social link (or "not found"), and a short
-   confidence note if the match seems uncertain (e.g. multiple businesses with
-   similar names in the search results).
-5. **Deduplicate:** Before writing, check the row's business name + address against
+4. **Normalize (plain code, no AI):** Clean/format the raw OSM fields + enrichment
+   snippet into a consistent row shape: business name, address, phone, email (or
+   "not found"), social link (or "not found"). This is ordinary field-mapping and
+   text cleanup — it doesn't need an AI model, and keeping it as plain code means the
+   unattended collection loop has no AI calls in it at all.
+5. **Deduplicate:** Before staging, check the row's business name + address against
    what's already in the Google Sheet (across all past campaigns, not just this
    one) — skip if already present.
-6. **Write:** Append the finished row directly to the Google Sheet via the Sheets
-   API (free, no billing account required, generous quota) — immediately, not
-   batched at the end of the state or campaign. This is what makes leads visible
-   while a multi-hour run is still in progress.
+6. **Stage:** Append the finished row to the **"Pending Review"** sheet tab
+   immediately (via the Sheets API) — this is what makes leads visible while a
+   multi-hour run is still in progress, without waiting for AI review.
 7. **Pace:** Space out requests to stay within Overpass's and the search API's
    fair-use/rate limits. This naturally makes a full state take real time — which
    fits the user's stated use case (start it before sleeping, stop it whenever
    there's enough for that batch) rather than being a problem to route around.
+
+### AI review batching (MiMo, periodic — not per-lead)
+
+Rather than calling MiMo per business (expensive and doesn't need per-item
+reasoning) or not at all (loses a useful quality check), MiMo is called in batches:
+
+- Every time 500 rows have accumulated in "Pending Review" since the last review
+  batch, the worker automatically sends that batch of 500 to MiMo (via OpenCode) in
+  one call, asking it to flag likely errors (garbled fields, obvious duplicates the
+  name/address dedup missed, mismatched contact info) — not to redo the normalization,
+  just to review it.
+- Rows MiMo doesn't flag move from "Pending Review" to the **"Master"** sheet tab
+  (the one the user actually works leads from). Flagged rows stay in "Pending
+  Review" with a note, for the user to eyeball themselves.
+- **Partial-batch flush:** if the campaign is stopped (or the state queue empties)
+  before reaching 500 pending rows, that partial batch is still sent through one
+  final review call rather than left stranded in "Pending Review" indefinitely.
+- This bounds MiMo token usage to roughly one batch call per 500 leads, regardless
+  of how many hours the campaign runs — addressing the user's stated concern about
+  not wanting a large token allocation exhausted in a single overnight run.
 
 ### Data storage
 
@@ -124,11 +149,15 @@ For each state pulled off the queue:
   status, and a lightweight record of leads already written (for cross-campaign
   deduplication) — this is the source of truth for "is this campaign still running,
   what's left to do."
-- **Google Sheets**: the user-facing output. One running master sheet (not
-  fragmented per campaign/run), columns: Business Name, Country, State, City, Phone,
-  Email, Social Link, Website Status (always "none" — that's the filter condition),
-  Date Found. Auth via a Google Cloud service account (free to create, Sheets API
-  itself has no billing requirement).
+- **Google Sheets**: the user-facing output, two tabs in one spreadsheet (not
+  fragmented per campaign/run):
+  - **Pending Review** — rows land here immediately as found, before AI review.
+  - **Master** — rows MiMo's batch review didn't flag; this is what the user
+    actually works leads from.
+  Both tabs share columns: Business Name, Country, State, City, Phone, Email, Social
+  Link, Website Status (always "none" — that's the filter condition), Date Found.
+  Auth via a Google Cloud service account (free to create, Sheets API itself has no
+  billing requirement).
 
 ### Resilience
 
@@ -153,6 +182,12 @@ Before considering this done:
    correct state rather than restarting the campaign or losing progress.
 7. Run the same state a second time and confirm no duplicate rows are added for
    businesses already in the sheet.
+8. Confirm rows land in "Pending Review" immediately, and move to "Master" only
+   after a batch review call (test with a small batch threshold, not the real 500,
+   to make this practical to verify).
+9. Stop a campaign with a partial batch (fewer than the threshold) pending, and
+   confirm that partial batch still gets flushed through one final review call
+   rather than staying stuck in "Pending Review."
 
 ## Open implementation details (for the planning phase, not blocking this spec)
 
@@ -162,5 +197,7 @@ Before considering this done:
 - Where the dashboard + worker are deployed on the VPS (own Docker container(s),
   following the existing `/opt/apps/<name>/docker-compose.yml` + git-tracked
   convention already used for the VPS's other services).
-- Exact mechanics of invoking MiMo via OpenCode for this task (reuse or adapt the
-  pattern from the user's existing `brain-hands-pipeline`).
+- Exact mechanics of invoking MiMo via OpenCode for the batch-review step — this is
+  a new, standalone invocation for this project, not a reuse of the FBC-specific
+  `fbc-builder` agent config from `brain-hands-pipeline` (that agent is scoped to
+  the fbc-arena project only).
