@@ -1,5 +1,6 @@
 import express from 'express'
 import 'dotenv/config'
+import { pathToFileURL } from 'node:url'
 import { handleStartCampaign, handleStopCampaign } from './routes.js'
 
 export function createApp() {
@@ -13,7 +14,7 @@ export function createApp() {
   return app
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { resetStaleInProgressStates } = await import('../campaign/queue.js')
   await resetStaleInProgressStates()
 

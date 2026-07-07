@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { dirname, join } from 'node:path'
 import { pool } from './pool.js'
 
@@ -10,7 +10,7 @@ export async function migrate(): Promise<void> {
   await pool.query(schema)
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   migrate()
     .then(() => {
       console.log('Migration complete')
