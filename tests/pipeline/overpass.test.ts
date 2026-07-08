@@ -42,7 +42,33 @@ describe('searchBusinesses', () => {
     expect(results[1]).toMatchObject({ name: 'Big Chain Fitness', hasWebsite: true })
   })
 
-  it('throws a descriptive error when Overpass returns a non-OK response', async () => {
+  it('sends a descriptive User-Agent header (Overpass blocks generic/missing ones)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockOverpassResponse,
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    await searchBusinesses('gyms', 'Texas')
+
+    const [, requestInit] = fetchMock.mock.calls[0]
+    expect(requestInit.headers['User-Agent']).toBeTruthy()
+  })
+
+  it('retries on failure and succeeds once Overpass responds OK', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 406 })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockOverpassResponse })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const results = await searchBusinesses('gyms', 'Texas')
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(results).toHaveLength(2)
+  })
+
+  it('throws a descriptive error after exhausting retries on a non-OK response', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 429 }) as unknown as typeof fetch
 
     await expect(searchBusinesses('gyms', 'Texas')).rejects.toThrow('Overpass request failed with status 429')

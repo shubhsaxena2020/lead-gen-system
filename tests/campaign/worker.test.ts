@@ -75,6 +75,25 @@ describe('processCampaign', () => {
     expect(mockAppendToPendingReview).not.toHaveBeenCalled()
   })
 
+  it('does not crash the whole campaign when a state\'s search fails — skips it and continues', async () => {
+    mockGetNextPendingState
+      .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })
+      .mockResolvedValueOnce({ id: 2, campaignId: 1, stateName: 'Ohio', status: 'in_progress' })
+      .mockResolvedValueOnce(null)
+
+    mockSearchBusinesses
+      .mockRejectedValueOnce(new Error('Overpass request failed with status 406'))
+      .mockResolvedValueOnce([
+        { name: 'Gym A', street: '1 Main St', city: 'Columbus', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+      ])
+
+    await expect(processCampaign(1, 'gyms', 'United States')).resolves.toBeUndefined()
+
+    expect(mockMarkStateDone).toHaveBeenCalledWith(1)
+    expect(mockMarkStateDone).toHaveBeenCalledWith(2)
+    expect(mockAppendToPendingReview).toHaveBeenCalledTimes(1)
+  })
+
   it('triggers a review batch once the pending count reaches the threshold', async () => {
     mockGetNextPendingState
       .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })

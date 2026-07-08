@@ -37,7 +37,15 @@ export async function processCampaign(
   let state = await getNextPendingState(campaignId)
 
   while (state) {
-    const businesses = await searchBusinesses(businessType, state.stateName)
+    let businesses: Awaited<ReturnType<typeof searchBusinesses>>
+    try {
+      businesses = await searchBusinesses(businessType, state.stateName)
+    } catch (err) {
+      console.error(`Skipping state "${state.stateName}" — search failed:`, err)
+      await markStateDone(state.id)
+      state = await getNextPendingState(campaignId)
+      continue
+    }
 
     for (const business of businesses) {
       if (await isCampaignStopped(campaignId)) {
