@@ -73,3 +73,21 @@ export async function isCampaignStopped(campaignId: number): Promise<boolean> {
 export async function resetStaleInProgressStates(): Promise<void> {
   await pool.query(`UPDATE state_queue SET status = 'pending' WHERE status = 'in_progress'`)
 }
+
+/**
+ * Campaigns still marked `running` when the process starts were mid-campaign
+ * when it last stopped (crash or restart) — nothing else resumes their worker
+ * loop, so the caller must re-invoke processCampaign for each of these.
+ */
+export async function getRunningCampaigns(): Promise<Campaign[]> {
+  const result = await pool.query(
+    `SELECT id, business_type, country, status, created_at FROM campaigns WHERE status = 'running'`
+  )
+  return result.rows.map((row) => ({
+    id: row.id,
+    businessType: row.business_type,
+    country: row.country,
+    status: row.status,
+    createdAt: row.created_at,
+  }))
+}

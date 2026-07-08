@@ -8,6 +8,7 @@ import {
   isCampaignStopped,
   stopCampaign,
   resetStaleInProgressStates,
+  getRunningCampaigns,
 } from '../../src/campaign/queue.js'
 
 describe('campaign queue', () => {
@@ -78,5 +79,16 @@ describe('campaign queue', () => {
       { state_name: 'Texas', status: 'pending' },
       { state_name: 'Ohio', status: 'pending' },
     ])
+  })
+
+  it('returns only running campaigns, so they can be resumed after a restart', async () => {
+    const running = await createCampaign('gyms', 'United States', ['Texas'])
+    const stopped = await createCampaign('gyms', 'Canada', ['Ontario'])
+    await stopCampaign(stopped.id)
+
+    const result = await getRunningCampaigns()
+
+    expect(result.map((c) => c.id)).toEqual([running.id])
+    expect(result[0]).toMatchObject({ businessType: 'gyms', country: 'United States' })
   })
 })

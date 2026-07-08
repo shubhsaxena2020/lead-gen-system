@@ -15,8 +15,14 @@ export function createApp() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { resetStaleInProgressStates } = await import('../campaign/queue.js')
+  const { resetStaleInProgressStates, getRunningCampaigns } = await import('../campaign/queue.js')
+  const { processCampaign } = await import('../campaign/worker.js')
   await resetStaleInProgressStates()
+
+  const runningCampaigns = await getRunningCampaigns()
+  for (const campaign of runningCampaigns) {
+    void processCampaign(campaign.id, campaign.businessType, campaign.country)
+  }
 
   const app = createApp()
   const port = Number(process.env.PORT ?? 3000)
