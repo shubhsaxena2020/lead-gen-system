@@ -4,7 +4,7 @@ services:
     container_name: leadgen
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@postgres:5432/leadgen
+      DATABASE_URL: postgres://leadgen:${LEADGEN_DB_PASSWORD}@postgres:5432/leadgen
       GOOGLE_SERVICE_ACCOUNT_JSON_PATH: /app/service-account.json
       GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
       OPENCODE_AGENT_NAME: leadgen-reviewer

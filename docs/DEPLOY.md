@@ -4,9 +4,19 @@
    `/opt/apps/<name>/` convention used by the other services).
 2. Copy `service-account.json` (the Google Cloud service account key) into
    `/opt/apps/leadgen/` — do not commit this file.
-3. Create `/opt/apps/leadgen/.env` with real values for `POSTGRES_PASSWORD` (matching
-   the existing shared Postgres container's password), `GOOGLE_SHEET_ID`,
+3. Create `/opt/apps/leadgen/.env` with real values for `LEADGEN_DB_PASSWORD` (the
+   password for the dedicated `leadgen` Postgres role/database, provisioned separately
+   from the shared superuser — see the DB provisioning note below), `GOOGLE_SHEET_ID`,
    `DASHBOARD_BASIC_AUTH_USER`, and `DASHBOARD_BASIC_AUTH_PASSWORD`.
+
+   **DB provisioning (one-time, before first deploy):** create an isolated role and
+   database on the existing shared Postgres container rather than reusing its
+   superuser credentials:
+   ```bash
+   docker exec -u postgres postgres psql \
+     -c "CREATE ROLE leadgen WITH LOGIN PASSWORD '<generated password>';" \
+     -c "CREATE DATABASE leadgen OWNER leadgen;"
+   ```
 4. Add a new block to `/opt/caddy/Caddyfile` (following the same pattern as the
    `9router`/`portainer`/`monitor` blocks):
 
