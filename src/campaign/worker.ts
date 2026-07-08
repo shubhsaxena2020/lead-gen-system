@@ -8,6 +8,14 @@ import type { LeadRow } from '../types.js'
 
 interface ProcessOptions {
   reviewBatchSize?: number
+  writePaceMs?: number
+}
+
+// Stay under Google Sheets' default ~60 write-requests-per-minute-per-user quota.
+const DEFAULT_WRITE_PACE_MS = 1100
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function maybeRunReviewBatch(options: ProcessOptions): Promise<void> {
@@ -47,6 +55,8 @@ export async function processCampaign(
       continue
     }
 
+    const writePaceMs = options.writePaceMs ?? DEFAULT_WRITE_PACE_MS
+
     for (const business of businesses) {
       if (await isCampaignStopped(campaignId)) {
         return
@@ -56,10 +66,16 @@ export async function processCampaign(
       const address = `${business.street ?? ''}, ${business.city ?? ''}`
       if (await isDuplicate(business.name, address)) continue
 
-      const lead = normalizeLead(business, country, state.stateName)
-      await appendToPendingReview(lead)
-      await markSeen(business.name, address)
-      await maybeRunReviewBatch(options)
+      try {
+        const lead = normalizeLead(business, country, state.stateName)
+        await appendToPendingReview(lead)
+        await markSeen(business.name, address)
+        await maybeRunReviewBatch(options)
+      } catch (err) {
+        console.error(`Skipping business "${business.name}" in "${state.stateName}" — write failed:`, err)
+      } finally {
+        if (writePaceMs > 0) await sleep(writePaceMs)
+      }
     }
 
     await markStateDone(state.id)

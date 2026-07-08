@@ -57,7 +57,7 @@ describe('processCampaign', () => {
       { name: 'Big Chain', street: '2 Corp Blvd', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: true },
     ])
 
-    await processCampaign(1, 'gyms', 'United States')
+    await processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })
 
     expect(mockAppendToPendingReview).toHaveBeenCalledTimes(1)
     expect(mockMarkStateDone).toHaveBeenCalledWith(1)
@@ -70,7 +70,7 @@ describe('processCampaign', () => {
       { name: 'Gym A', street: '1 Main St', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
     ])
 
-    await processCampaign(1, 'gyms', 'United States')
+    await processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })
 
     expect(mockAppendToPendingReview).not.toHaveBeenCalled()
   })
@@ -87,11 +87,46 @@ describe('processCampaign', () => {
         { name: 'Gym A', street: '1 Main St', city: 'Columbus', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
       ])
 
-    await expect(processCampaign(1, 'gyms', 'United States')).resolves.toBeUndefined()
+    await expect(processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })).resolves.toBeUndefined()
 
     expect(mockMarkStateDone).toHaveBeenCalledWith(1)
     expect(mockMarkStateDone).toHaveBeenCalledWith(2)
     expect(mockAppendToPendingReview).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not crash when writing a single business fails (e.g. Sheets rate limit) — skips it and continues', async () => {
+    mockGetNextPendingState
+      .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'California', status: 'in_progress' })
+      .mockResolvedValueOnce(null)
+
+    mockSearchBusinesses.mockResolvedValueOnce([
+      { name: 'Gym A', street: '1 Main St', city: 'LA', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+      { name: 'Gym B', street: '2 Main St', city: 'LA', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+    ])
+    mockAppendToPendingReview
+      .mockRejectedValueOnce(new Error('Quota exceeded for quota metric \'Write requests\''))
+      .mockResolvedValueOnce(undefined)
+
+    await expect(processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })).resolves.toBeUndefined()
+
+    expect(mockAppendToPendingReview).toHaveBeenCalledTimes(2)
+    expect(mockMarkSeen).toHaveBeenCalledTimes(1)
+    expect(mockMarkStateDone).toHaveBeenCalledWith(1)
+  })
+
+  it('paces writes to stay under the Sheets API rate limit', async () => {
+    mockGetNextPendingState
+      .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })
+      .mockResolvedValueOnce(null)
+    mockSearchBusinesses.mockResolvedValueOnce([
+      { name: 'Gym A', street: '1 Main St', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+    ])
+
+    const start = Date.now()
+    await processCampaign(1, 'gyms', 'United States', { writePaceMs: 200 })
+    const elapsed = Date.now() - start
+
+    expect(elapsed).toBeGreaterThanOrEqual(190)
   })
 
   it('triggers a review batch once the pending count reaches the threshold', async () => {
@@ -107,7 +142,7 @@ describe('processCampaign', () => {
     mockGetPendingReviewRows.mockResolvedValue(new Array(2).fill(['x']))
     mockReviewBatch.mockResolvedValue({ clean: [{}, {}], flagged: [] })
 
-    await processCampaign(1, 'gyms', 'United States', { reviewBatchSize: 2 })
+    await processCampaign(1, 'gyms', 'United States', { reviewBatchSize: 2, writePaceMs: 0 })
 
     expect(mockReviewBatch).toHaveBeenCalled()
     expect(mockPromoteRowsToMaster).toHaveBeenCalled()
