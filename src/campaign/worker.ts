@@ -2,7 +2,7 @@ import { getNextPendingState, markStateDone, isCampaignStopped } from './queue.j
 import { searchBusinesses } from '../pipeline/overpass.js'
 import { normalizeLead } from '../pipeline/normalize.js'
 import { isDuplicate, markSeen } from '../pipeline/dedup.js'
-import { appendToPendingReview, getPendingReviewRows, promoteRowsToMaster } from '../pipeline/sheets.js'
+import { appendToPendingReview, getPendingReviewRows, clearPendingReview, promoteRowsToMaster } from '../pipeline/sheets.js'
 import { reviewBatch } from '../pipeline/reviewBatch.js'
 import type { LeadRow } from '../types.js'
 
@@ -29,11 +29,23 @@ async function maybeRunReviewBatch(options: ProcessOptions): Promise<void> {
     websiteStatus: 'none', dateFound: row[8],
   }))
 
-  const { clean } = await reviewBatch(leads)
+  const { clean, flagged } = await reviewBatch(leads)
+
+  // Clear the whole batch we just reviewed — otherwise Pending Review keeps
+  // growing forever, the threshold check never resets, and MiMo ends up
+  // re-reviewing the entire accumulated history on every subsequent lead.
+  await clearPendingReview()
+
   await promoteRowsToMaster(clean.map((lead) => [
     lead.businessName, lead.country, lead.state, lead.city,
     lead.phone, lead.email, lead.socialLink, lead.websiteStatus, lead.dateFound,
   ]))
+
+  // Flagged rows go back into Pending Review so the user can still eyeball
+  // them, rather than being silently dropped by the clear above.
+  for (const lead of flagged) {
+    await appendToPendingReview(lead)
+  }
 }
 
 export async function processCampaign(

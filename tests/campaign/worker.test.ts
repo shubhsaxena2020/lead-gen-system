@@ -9,6 +9,7 @@ const {
   mockMarkSeen,
   mockAppendToPendingReview,
   mockGetPendingReviewRows,
+  mockClearPendingReview,
   mockPromoteRowsToMaster,
   mockReviewBatch,
 } = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const {
   mockMarkSeen: vi.fn(),
   mockAppendToPendingReview: vi.fn(),
   mockGetPendingReviewRows: vi.fn().mockResolvedValue([]),
+  mockClearPendingReview: vi.fn(),
   mockPromoteRowsToMaster: vi.fn(),
   mockReviewBatch: vi.fn(),
 }))
@@ -34,6 +36,7 @@ vi.mock('../../src/pipeline/dedup.js', () => ({ isDuplicate: mockIsDuplicate, ma
 vi.mock('../../src/pipeline/sheets.js', () => ({
   appendToPendingReview: mockAppendToPendingReview,
   getPendingReviewRows: mockGetPendingReviewRows,
+  clearPendingReview: mockClearPendingReview,
   promoteRowsToMaster: mockPromoteRowsToMaster,
 }))
 vi.mock('../../src/pipeline/reviewBatch.js', () => ({ reviewBatch: mockReviewBatch }))
@@ -129,7 +132,7 @@ describe('processCampaign', () => {
     expect(elapsed).toBeGreaterThanOrEqual(190)
   })
 
-  it('triggers a review batch once the pending count reaches the threshold', async () => {
+  it('triggers a review batch once the pending count reaches the threshold, clears Pending Review, and puts flagged rows back', async () => {
     mockGetNextPendingState
       .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })
       .mockResolvedValueOnce(null)
@@ -139,12 +142,38 @@ describe('processCampaign', () => {
       phone: null, email: null, facebook: null, instagram: null, hasWebsite: false,
     }))
     mockSearchBusinesses.mockResolvedValueOnce(manyBusinesses)
-    mockGetPendingReviewRows.mockResolvedValue(new Array(2).fill(['x']))
-    mockReviewBatch.mockResolvedValue({ clean: [{}, {}], flagged: [] })
+    mockGetPendingReviewRows.mockResolvedValue(new Array(2).fill(['x', 'US', 'TX', 'Austin', 'p', 'e', 's', 'none', '2026-07-08']))
+    const flaggedLead = { businessName: 'Sketchy Gym', country: 'US', state: 'TX', city: 'Austin', phone: 'p', email: 'e', socialLink: 's', websiteStatus: 'none', dateFound: '2026-07-08' }
+    mockReviewBatch.mockResolvedValue({ clean: [{}], flagged: [flaggedLead] })
 
     await processCampaign(1, 'gyms', 'United States', { reviewBatchSize: 2, writePaceMs: 0 })
 
     expect(mockReviewBatch).toHaveBeenCalled()
+    expect(mockClearPendingReview).toHaveBeenCalled()
     expect(mockPromoteRowsToMaster).toHaveBeenCalled()
+    // Flagged rows go back into Pending Review so the user can still eyeball them,
+    // instead of being silently dropped or re-reviewed forever.
+    expect(mockAppendToPendingReview).toHaveBeenCalledWith(flaggedLead)
+  })
+
+  it('does not re-trigger a review batch for leads already processed in a prior batch', async () => {
+    mockGetNextPendingState
+      .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })
+      .mockResolvedValueOnce({ id: 2, campaignId: 1, stateName: 'Ohio', status: 'in_progress' })
+      .mockResolvedValueOnce(null)
+
+    mockSearchBusinesses
+      .mockResolvedValueOnce([{ name: 'Gym A', street: '1 Main St', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false }])
+      .mockResolvedValueOnce([{ name: 'Gym B', street: '1 Main St', city: 'Columbus', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false }])
+
+    // Once cleared, Pending Review reports empty again for the second business.
+    mockGetPendingReviewRows
+      .mockResolvedValueOnce([['x']]) // triggers the batch (reviewBatchSize: 1)
+      .mockResolvedValueOnce([]) // cleared — second business shouldn't re-trigger
+    mockReviewBatch.mockResolvedValue({ clean: [{}], flagged: [] })
+
+    await processCampaign(1, 'gyms', 'United States', { reviewBatchSize: 1, writePaceMs: 0 })
+
+    expect(mockReviewBatch).toHaveBeenCalledTimes(1)
   })
 })

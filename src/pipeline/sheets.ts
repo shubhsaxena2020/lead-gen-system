@@ -41,6 +41,21 @@ export async function getPendingReviewRows(): Promise<string[][]> {
   return result.data.values ?? []
 }
 
+/**
+ * Clear all data rows from Pending Review (keeping the header). Call this once
+ * a batch has been reviewed and clean rows promoted to Master — otherwise
+ * Pending Review grows without bound, the every-500-leads batch threshold
+ * never resets, and MiMo ends up re-reviewing the entire accumulated history
+ * on every subsequent lead instead of once per batch.
+ */
+export async function clearPendingReview(): Promise<void> {
+  const sheets = await getSheetsClient()
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID,
+    range: `${PENDING_TAB}!A2:I`,
+  })
+}
+
 export async function promoteRowsToMaster(rows: string[][]): Promise<void> {
   if (rows.length === 0) return
   const sheets = await getSheetsClient()
