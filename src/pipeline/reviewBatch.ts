@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import 'dotenv/config'
 import type { LeadRow } from '../types.js'
 
@@ -9,15 +9,29 @@ interface ReviewResult {
 
 function runOpenCode(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
+    // execFile defaults to an open, never-closed stdin pipe - opencode treats
+    // that as "input is being piped in" and blocks waiting for EOF that never
+    // arrives, hanging forever instead of ever returning. execFile's options
+    // don't support overriding stdio, so use spawn (which does) instead.
+    const child = spawn(
       'opencode',
       ['run', '--agent', process.env.OPENCODE_AGENT_NAME ?? 'leadgen-reviewer', prompt],
-      { maxBuffer: 10 * 1024 * 1024 },
-      (err, stdout) => {
-        if (err) return reject(err)
-        resolve(stdout)
-      }
+      { stdio: ['ignore', 'pipe', 'pipe'] }
     )
+
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => { stdout += chunk })
+    child.stderr.on('data', (chunk) => { stderr += chunk })
+
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`opencode exited with code ${code}: ${stderr}`))
+        return
+      }
+      resolve(stdout)
+    })
   })
 }
 
