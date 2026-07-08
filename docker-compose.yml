@@ -13,7 +13,7 @@ services:
       DASHBOARD_BASIC_AUTH_PASSWORD: ${DASHBOARD_BASIC_AUTH_PASSWORD}
     volumes:
       - ./service-account.json:/app/service-account.json:ro
-      - ~/.config/opencode:/root/.config/opencode:ro
+      - ~/.config/opencode:/root/.config/opencode
     expose:
       - 3000
     networks:
