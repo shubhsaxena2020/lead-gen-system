@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express'
-import { createCampaign, stopCampaign } from '../campaign/queue.js'
+import { createCampaign, stopCampaign, getCampaignsStatus } from '../campaign/queue.js'
 import { processCampaign } from '../campaign/worker.js'
 
 export async function handleStartCampaign(req: Request, res: Response): Promise<void> {
@@ -22,4 +22,9 @@ export async function handleStopCampaign(req: Request, res: Response): Promise<v
   const id = Number(req.params.id)
   await stopCampaign(id)
   res.json({ stopped: true })
+}
+
+export async function handleCampaignsStatus(_req: Request, res: Response): Promise<void> {
+  const campaigns = await getCampaignsStatus()
+  res.json(campaigns)
 }

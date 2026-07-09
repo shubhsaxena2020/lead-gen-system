@@ -1,7 +1,7 @@
 import express from 'express'
 import 'dotenv/config'
 import { pathToFileURL } from 'node:url'
-import { handleStartCampaign, handleStopCampaign } from './routes.js'
+import { handleStartCampaign, handleStopCampaign, handleCampaignsStatus } from './routes.js'
 
 export function createApp() {
   const app = express()
@@ -10,6 +10,7 @@ export function createApp() {
 
   app.post('/campaigns', handleStartCampaign)
   app.post('/campaigns/:id/stop', handleStopCampaign)
+  app.get('/campaigns/status', handleCampaignsStatus)
 
   return app
 }

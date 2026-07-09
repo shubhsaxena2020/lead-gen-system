@@ -91,3 +91,32 @@ export async function getRunningCampaigns(): Promise<Campaign[]> {
     createdAt: row.created_at,
   }))
 }
+
+export interface CampaignWithProgress extends Campaign {
+  statesDone: number
+  statesTotal: number
+}
+
+/** All running campaigns plus their state_queue progress, for dashboard display. */
+export async function getCampaignsStatus(): Promise<CampaignWithProgress[]> {
+  const result = await pool.query(
+    `SELECT
+       c.id, c.business_type, c.country, c.status, c.created_at,
+       COUNT(sq.id) FILTER (WHERE sq.status = 'done') AS states_done,
+       COUNT(sq.id) AS states_total
+     FROM campaigns c
+     LEFT JOIN state_queue sq ON sq.campaign_id = c.id
+     WHERE c.status = 'running'
+     GROUP BY c.id
+     ORDER BY c.created_at DESC`
+  )
+  return result.rows.map((row) => ({
+    id: row.id,
+    businessType: row.business_type,
+    country: row.country,
+    status: row.status,
+    createdAt: row.created_at,
+    statesDone: Number(row.states_done),
+    statesTotal: Number(row.states_total),
+  }))
+}
