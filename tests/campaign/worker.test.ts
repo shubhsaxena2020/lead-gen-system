@@ -4,6 +4,7 @@ const {
   mockGetNextPendingState,
   mockMarkStateDone,
   mockIsCampaignStopped,
+  mockCompleteCampaign,
   mockSearchBusinesses,
   mockIsDuplicate,
   mockMarkSeen,
@@ -16,6 +17,7 @@ const {
   mockGetNextPendingState: vi.fn(),
   mockMarkStateDone: vi.fn(),
   mockIsCampaignStopped: vi.fn().mockResolvedValue(false),
+  mockCompleteCampaign: vi.fn(),
   mockSearchBusinesses: vi.fn(),
   mockIsDuplicate: vi.fn().mockResolvedValue(false),
   mockMarkSeen: vi.fn(),
@@ -30,6 +32,7 @@ vi.mock('../../src/campaign/queue.js', () => ({
   getNextPendingState: mockGetNextPendingState,
   markStateDone: mockMarkStateDone,
   isCampaignStopped: mockIsCampaignStopped,
+  completeCampaign: mockCompleteCampaign,
 }))
 vi.mock('../../src/pipeline/overpass.js', () => ({ searchBusinesses: mockSearchBusinesses }))
 vi.mock('../../src/pipeline/dedup.js', () => ({ isDuplicate: mockIsDuplicate, markSeen: mockMarkSeen }))
@@ -76,6 +79,26 @@ describe('processCampaign', () => {
     await processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })
 
     expect(mockAppendToPendingReview).not.toHaveBeenCalled()
+  })
+
+  it('flushes Pending Review to Master and completes the campaign when stopped mid-run, instead of stranding already-written leads', async () => {
+    mockGetNextPendingState.mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })
+    mockIsCampaignStopped
+      .mockResolvedValueOnce(false) // Gym A: not stopped yet — gets written
+      .mockResolvedValueOnce(true) // Gym B: stop flag now set — loop breaks here
+    mockSearchBusinesses.mockResolvedValueOnce([
+      { name: 'Gym A', street: '1 Main St', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+      { name: 'Gym B', street: '2 Main St', city: 'Austin', phone: null, email: null, facebook: null, instagram: null, hasWebsite: false },
+    ])
+    mockGetPendingReviewRows.mockResolvedValue([['x', 'US', 'TX', 'Austin', 'p', 'e', 's', 'none', '2026-07-08']])
+    mockReviewBatch.mockResolvedValue({ clean: [{}], flagged: [] })
+
+    await processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })
+
+    expect(mockAppendToPendingReview).toHaveBeenCalledTimes(1) // only Gym A, written before the stop
+    expect(mockReviewBatch).toHaveBeenCalledTimes(1) // final flush still ran despite the stop
+    expect(mockPromoteRowsToMaster).toHaveBeenCalled() // leads reached Master, not stranded in Pending Review
+    expect(mockCompleteCampaign).toHaveBeenCalledWith(1)
   })
 
   it('does not crash the whole campaign when a state\'s search fails — skips it and continues', async () => {

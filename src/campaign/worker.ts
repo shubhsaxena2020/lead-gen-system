@@ -56,6 +56,7 @@ export async function processCampaign(
 ): Promise<void> {
   let state = await getNextPendingState(campaignId)
 
+  stateLoop:
   while (state) {
     let businesses: Awaited<ReturnType<typeof searchBusinesses>>
     try {
@@ -71,7 +72,7 @@ export async function processCampaign(
 
     for (const business of businesses) {
       if (await isCampaignStopped(campaignId)) {
-        return
+        break stateLoop
       }
       if (business.hasWebsite) continue
 
@@ -94,10 +95,13 @@ export async function processCampaign(
     state = await getNextPendingState(campaignId)
   }
 
-  // Final partial-batch flush once the queue is empty
+  // Final partial-batch flush -- runs both when the queue empties out
+  // naturally AND when a Stop broke out of the loop above, so leads already
+  // written to Pending Review still reach Master (and the email scraper)
+  // instead of being stranded.
   await maybeRunReviewBatch({ ...options, reviewBatchSize: 1 })
 
-  // All states processed and flushed -- mark the campaign done so it stops
-  // showing as "running" on the dashboard.
+  // No-op for a stopped campaign (guarded on status='running' inside),
+  // so this is safe to call unconditionally regardless of why we got here.
   await completeCampaign(campaignId)
 }
