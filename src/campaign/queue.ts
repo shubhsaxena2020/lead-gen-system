@@ -59,6 +59,19 @@ export async function stopCampaign(campaignId: number): Promise<void> {
   await pool.query(`UPDATE campaigns SET status = 'stopped' WHERE id = $1`, [campaignId])
 }
 
+/**
+ * Mark a campaign done once it has worked through all its states. Without this
+ * a finished campaign stays `status = 'running'` forever, so the dashboard
+ * (which lists running campaigns) keeps showing it as active. Guarded on
+ * `status = 'running'` so it never overrides a concurrent stop.
+ */
+export async function completeCampaign(campaignId: number): Promise<void> {
+  await pool.query(
+    `UPDATE campaigns SET status = 'completed' WHERE id = $1 AND status = 'running'`,
+    [campaignId]
+  )
+}
+
 export async function isCampaignStopped(campaignId: number): Promise<boolean> {
   const result = await pool.query(`SELECT status FROM campaigns WHERE id = $1`, [campaignId])
   return result.rows[0]?.status === 'stopped'

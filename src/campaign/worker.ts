@@ -1,4 +1,4 @@
-import { getNextPendingState, markStateDone, isCampaignStopped } from './queue.js'
+import { getNextPendingState, markStateDone, isCampaignStopped, completeCampaign } from './queue.js'
 import { searchBusinesses } from '../pipeline/overpass.js'
 import { normalizeLead } from '../pipeline/normalize.js'
 import { isDuplicate, markSeen } from '../pipeline/dedup.js'
@@ -96,4 +96,8 @@ export async function processCampaign(
 
   // Final partial-batch flush once the queue is empty
   await maybeRunReviewBatch({ ...options, reviewBatchSize: 1 })
+
+  // All states processed and flushed -- mark the campaign done so it stops
+  // showing as "running" on the dashboard.
+  await completeCampaign(campaignId)
 }
