@@ -98,8 +98,15 @@ export async function processCampaign(
   // Final partial-batch flush -- runs both when the queue empties out
   // naturally AND when a Stop broke out of the loop above, so leads already
   // written to Pending Review still reach Master (and the email scraper)
-  // instead of being stranded.
-  await maybeRunReviewBatch({ ...options, reviewBatchSize: 1 })
+  // instead of being stranded. Unlike the in-loop call above, this one
+  // wasn't wrapped in a try/catch -- a review failure here (e.g. the model
+  // not returning valid JSON) crashed the whole process instead of just
+  // leaving the rows in Pending Review for the next attempt.
+  try {
+    await maybeRunReviewBatch({ ...options, reviewBatchSize: 1 })
+  } catch (err) {
+    console.error(`Final review batch failed for campaign ${campaignId} — leaving rows in Pending Review:`, err)
+  }
 
   // No-op for a stopped campaign (guarded on status='running' inside),
   // so this is safe to call unconditionally regardless of why we got here.

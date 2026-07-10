@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 
-const { spawnMock, lastChild } = vi.hoisted(() => ({ spawnMock: vi.fn(), lastChild: { current: null as any } }))
+const { spawnMock, lastChild, nextResponse } = vi.hoisted(() => ({
+  spawnMock: vi.fn(),
+  lastChild: { current: null as any },
+  nextResponse: { current: JSON.stringify({ flaggedIndexes: [1] }) },
+}))
 
 vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => {
@@ -12,7 +16,7 @@ vi.mock('node:child_process', () => ({
     child.stdin = { write: vi.fn(), end: vi.fn() }
     lastChild.current = child
     process.nextTick(() => {
-      child.stdout.emit('data', JSON.stringify({ flaggedIndexes: [1] }))
+      child.stdout.emit('data', nextResponse.current)
       child.emit('close', 0)
     })
     return child
@@ -31,7 +35,10 @@ function makeLead(name: string): LeadRow {
 }
 
 describe('reviewBatch', () => {
-  beforeEach(() => spawnMock.mockClear())
+  beforeEach(() => {
+    spawnMock.mockClear()
+    nextResponse.current = JSON.stringify({ flaggedIndexes: [1] })
+  })
 
   it('splits leads into clean and flagged based on OpenCode/MiMo output', async () => {
     const leads = [makeLead('Gym A'), makeLead('Gym A'), makeLead('Gym B')]
@@ -70,5 +77,28 @@ describe('reviewBatch', () => {
       expect.stringContaining(leads[0].businessName)
     )
     expect(lastChild.current.stdin.end).toHaveBeenCalled()
+  })
+
+  it('extracts the JSON object even when the model prefixes it with reasoning prose', async () => {
+    // Reproduced live: despite being told to respond with ONLY JSON, the
+    // model sometimes answers with "Looking at this batch, I'll scan
+    // for..." ahead of the real payload, which crashed the whole container
+    // via an uncaught JSON.parse SyntaxError.
+    nextResponse.current = [
+      "Looking at this batch, I'll scan for garbled names and duplicates.",
+      '',
+      JSON.stringify({ flaggedIndexes: [0] }),
+    ].join('\n')
+
+    const leads = [makeLead('Gym A'), makeLead('Gym B')]
+    const result = await reviewBatch(leads)
+
+    expect(result.flagged).toHaveLength(1)
+    expect(result.flagged[0].businessName).toBe('Gym A')
+  })
+
+  it('throws a clear error when no JSON object is present at all', async () => {
+    nextResponse.current = 'Sorry, I cannot review this batch.'
+    await expect(reviewBatch([makeLead('Gym A')])).rejects.toThrow(/No JSON object found/)
   })
 })

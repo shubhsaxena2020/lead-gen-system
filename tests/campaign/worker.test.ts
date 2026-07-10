@@ -179,6 +179,20 @@ describe('processCampaign', () => {
     expect(mockAppendToPendingReview).toHaveBeenCalledWith(flaggedLead)
   })
 
+  it('does not crash the whole process when the final flush review batch fails — campaign still completes', async () => {
+    // Reproduced live: the model occasionally returns prose instead of pure
+    // JSON, which used to throw uncaught out of the unwrapped final flush
+    // call and take down the whole container (not just this campaign).
+    mockGetNextPendingState.mockResolvedValueOnce(null) // queue already empty, straight to final flush
+    mockGetPendingReviewRows.mockResolvedValue([['x', 'US', 'TX', 'Austin', 'p', 'e', 's', 'none', '2026-07-08']])
+    mockReviewBatch.mockRejectedValue(new Error('No JSON object found in opencode response'))
+
+    await expect(processCampaign(1, 'gyms', 'United States', { writePaceMs: 0 })).resolves.toBeUndefined()
+
+    expect(mockClearPendingReview).not.toHaveBeenCalled() // review failed before clearing — rows stay for next attempt
+    expect(mockCompleteCampaign).toHaveBeenCalledWith(1) // campaign still completes despite the review failure
+  })
+
   it('does not re-trigger a review batch for leads already processed in a prior batch', async () => {
     mockGetNextPendingState
       .mockResolvedValueOnce({ id: 1, campaignId: 1, stateName: 'Texas', status: 'in_progress' })

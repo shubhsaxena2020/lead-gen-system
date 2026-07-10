@@ -40,6 +40,20 @@ function runOpenCode(prompt: string): Promise<string> {
   })
 }
 
+// The model sometimes prefixes its answer with reasoning prose before the
+// JSON object despite being told to respond with ONLY JSON (observed live:
+// "Looking at this batch, I'll scan for..." ahead of the real payload).
+// Slicing from the first '{' to the last '}' recovers the object regardless
+// of surrounding commentary.
+function extractJson(text: string): { flaggedIndexes: number[] } {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start === -1 || end === -1 || end < start) {
+    throw new Error(`No JSON object found in opencode response: ${text.slice(0, 200)}`)
+  }
+  return JSON.parse(text.slice(start, end + 1))
+}
+
 export async function reviewBatch(leads: LeadRow[]): Promise<ReviewResult> {
   const prompt = [
     'Review this batch of business leads for likely errors: garbled fields,',
@@ -50,7 +64,7 @@ export async function reviewBatch(leads: LeadRow[]): Promise<ReviewResult> {
   ].join('\n')
 
   const stdout = await runOpenCode(prompt)
-  const parsed = JSON.parse(stdout) as { flaggedIndexes: number[] }
+  const parsed = extractJson(stdout)
   const flaggedSet = new Set(parsed.flaggedIndexes)
 
   const clean: LeadRow[] = []
