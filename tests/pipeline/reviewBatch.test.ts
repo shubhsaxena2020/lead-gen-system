@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 
-const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }))
+const { spawnMock, lastChild } = vi.hoisted(() => ({ spawnMock: vi.fn(), lastChild: { current: null as any } }))
 
 vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => {
@@ -9,6 +9,8 @@ vi.mock('node:child_process', () => ({
     const child: any = new EventEmitter()
     child.stdout = new EventEmitter()
     child.stderr = new EventEmitter()
+    child.stdin = { write: vi.fn(), end: vi.fn() }
+    lastChild.current = child
     process.nextTick(() => {
       child.stdout.emit('data', JSON.stringify({ flaggedIndexes: [1] }))
       child.emit('close', 0)
@@ -49,13 +51,24 @@ describe('reviewBatch', () => {
     )
   })
 
-  it('closes the child process stdin instead of leaving it as an open pipe', async () => {
-    // A plain open stdin pipe (execFile's default) makes opencode wait
-    // forever for piped input that never arrives - reproduced live against
-    // a real deployed container, where every review-batch call hung
-    // indefinitely instead of ever returning.
-    await reviewBatch([makeLead('Gym A')])
-    const [, , options] = spawnMock.mock.calls[0]
-    expect((options as { stdio: string[] }).stdio[0]).toBe('ignore')
+  it('writes the prompt to stdin and closes it, instead of passing it as a CLI argument', async () => {
+    // The prompt used to be passed as a CLI arg, but a large review batch
+    // serializes to more bytes than the OS allows in one process's argv -
+    // reproduced live against a real deployed container, which crash-looped
+    // with `spawn E2BIG` once enough leads had accumulated. Piping over
+    // stdin removes that ceiling; explicitly ending the stream (rather than
+    // execFile's default of leaving it open with nothing written) avoids
+    // the separate hang bug this code already guards against.
+    const leads = [makeLead('Gym A')]
+    await reviewBatch(leads)
+
+    const [, args, options] = spawnMock.mock.calls[0]
+    expect(args).toEqual(['run', '--agent', expect.any(String)])
+    expect((options as { stdio: string[] }).stdio[0]).toBe('pipe')
+
+    expect(lastChild.current.stdin.write).toHaveBeenCalledWith(
+      expect.stringContaining(leads[0].businessName)
+    )
+    expect(lastChild.current.stdin.end).toHaveBeenCalled()
   })
 })

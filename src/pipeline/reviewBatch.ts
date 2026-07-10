@@ -9,14 +9,16 @@ interface ReviewResult {
 
 function runOpenCode(prompt: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    // execFile defaults to an open, never-closed stdin pipe - opencode treats
-    // that as "input is being piped in" and blocks waiting for EOF that never
-    // arrives, hanging forever instead of ever returning. execFile's options
-    // don't support overriding stdio, so use spawn (which does) instead.
+    // The prompt used to be passed as a CLI argument, but a large review
+    // batch serializes to more bytes than the OS allows in a single process's
+    // argv (spawn fails with E2BIG). Pipe it over stdin instead - explicitly
+    // writing then ending the stream avoids the original hang bug too (that
+    // one came from execFile's default of leaving stdin open with nothing
+    // ever written to it, so opencode blocked forever waiting for EOF).
     const child = spawn(
       'opencode',
-      ['run', '--agent', process.env.OPENCODE_AGENT_NAME ?? 'leadgen-reviewer', prompt],
-      { stdio: ['ignore', 'pipe', 'pipe'] }
+      ['run', '--agent', process.env.OPENCODE_AGENT_NAME ?? 'leadgen-reviewer'],
+      { stdio: ['pipe', 'pipe', 'pipe'] }
     )
 
     let stdout = ''
@@ -32,6 +34,9 @@ function runOpenCode(prompt: string): Promise<string> {
       }
       resolve(stdout)
     })
+
+    child.stdin.write(prompt)
+    child.stdin.end()
   })
 }
 
